@@ -11,6 +11,7 @@ import sys
 from shortest_path import Graph, dijkstra
 import pandas as pd
 from sklearn.metrics import mean_squared_error
+from glob import glob
 
 def normalize_data(X, norm_method):
     data = X.drop(columns=['DateTime'])
@@ -267,14 +268,17 @@ def get_test_data(args, norm_method):
     
     return test_data, test_ground_truth
 
-def get_ct_data(args, norm_method):
+def get_ct_train(args, norm_method):
     train_data = pd.read_csv(args.ct_train)
     train_data_norm = normalize_data(train_data, norm_method)
-    test_data = pd.read_csv(args.ct_test)
-    test_data_norm = normalize_data(test_data, norm_method)
-    return train_data_norm, test_data_norm
+    # test_data = pd.read_csv(args.ct_test)
+    # test_data_norm = normalize_data(test_data, norm_method)
+    return train_data_norm
 
-    
+def get_ct_test(path, norm_method):
+    test_data = pd.read_csv(path)
+    test_data_norm = normalize_data(test_data, norm_method)
+    return test_data_norm
 
 def shuffle_matrix(test_data, prediction):
     indices = np.arange(test_data.shape[0])
@@ -327,8 +331,8 @@ if __name__ == "__main__":
     parser.add_argument('--train_spectra', required=False, help='input training dataset with spectra')
     parser.add_argument('--test_spectra', required=False, help='test dataset with spectra')
     parser.add_argument('--test_lab_result', required=False, help='test data with lab results')
-    # parser.add_argument('--ct_train', required=False, default=False, help='path to coal tracker train data')
-    # parser.add_argument('--ct_test', required=False, default=False, help='path to coal tracker test data')
+    parser.add_argument('--ct_train', required=False, default=False, help='path to coal tracker train data')
+    parser.add_argument('--ct_test_dir', required=False, default=False, help='path to coal tracker test data')
     parser.add_argument('--n_columns', required=True, type=int, help='number of columns for SOM')
     parser.add_argument('--n_rows', required=True, type=int, help='number of rows for SOM')
     parser.add_argument('--n_epochs', required=True, type=int, help='number of epochs for SOM training')
@@ -342,74 +346,65 @@ if __name__ == "__main__":
     n_columns = args.n_columns
     n_rows = args.n_rows
     num_neighbors = args.num_neighbors
-    # print("num neighbors {}".format(num_neighbors))
+    print("num neighbors {}".format(num_neighbors))
     # num_validation_points = args.vali_points
     
-    train_data = get_input_data(args.train_spectra, "minmax")
-    test_data, test_ground_truth = get_test_data(args, "minmax")
-    
-    # train_data, test_data_all = get_ct_data(args, "minmax")
-    # test_data = test_data_all[:, 3:]
-    # test_ground_truth = test_data_all[:, :3]
-    
+    train_data = get_ct_train(args, "minmax")
     num_spectra_columns = len(train_data[0])
-    # num_ct_counts = 15
-    # num_spectra_columns -= num_ct_counts
-    # print("num spectra columns is {}".format(num_spectra_columns))
-    num_vali_points = len(test_ground_truth)
-    
+    print("num spectra columns is {}".format(num_spectra_columns))
+
+    print("training SOM with size {} by {}". format(n_rows, n_columns))
     som = susi.SOMClustering(n_rows=n_rows, n_columns=n_columns, n_iter_unsupervised=args.n_epochs)
     som.fit(train_data)
-            
-    # if args.test_spectra is not None and args.test_lab_result is not None:
-    prediction = som.transform(test_data[:, :num_spectra_columns])
-    # else:
-    #     prediction = None
-        
 
-    u_matrix = som.get_u_matrix()
-         
-    if args.plot_hist:
-        bums = som.get_bmus(train_data)
-        bums = np.array(bums)
-        count = count_occurance(bums, n_rows, n_columns)
-        save_som_hist(bums, args, prediction, int(np.max(count)))
-            
-    shortest_distance = shortest_path_matrix(prediction, u_matrix, n_rows, n_columns)
-    save_shortest_distance_csv(args, shortest_distance)
-    
-    num_properties = len(test_ground_truth[0])
-    print("num properties is {}, use {} neighbors".format(num_properties, num_neighbors))
+    test_file_names = glob(args.ct_test_dir + "/*.csv")
+
     weighted_acc = []
     avg_acc = []
     random_neighbor_acc = []
     random_acc = []
+
+    for file in test_file_names:
     
-    for fenmu in [0.1]:
-        for i in range(20):
-            # pd.DataFrame(shortest_distance).to_csv('before.csv')
-
-            # test_data_all, shortest_distance = shuffle_matrix(test_data_all, shortest_distance)
-            # test_ground_truth = test_data_all[:, :3]
-            
-            weighted_neighbor_pred, average_neighbor_pred, random_neighbor_pred = estimate_value(shortest_distance, num_neighbors, num_vali_points, num_properties, fenmu)
-            weighted_som_acc = mean_squared_error(weighted_neighbor_pred, test_ground_truth[:num_vali_points])
-            average_som_acc = mean_squared_error(average_neighbor_pred, test_ground_truth[:num_vali_points])
-            random_som_acc = mean_squared_error(random_neighbor_pred, test_ground_truth[:num_vali_points])
-
-            random_guess_array = get_random_array(num_vali_points, num_properties)
-            random_guess_acc = mean_squared_error(random_guess_array, test_ground_truth[:num_vali_points])
-            weighted_acc.append(weighted_som_acc)
-            avg_acc.append(average_som_acc)
-            random_neighbor_acc.append(random_som_acc)
-            random_acc.append(random_guess_acc)
-        # print("inverse number is {}".format(fenmu))
+        test_data_all = get_ct_test(file, "minmax")
+        test_data = test_data_all[:, 3:]
+        test_ground_truth = test_data_all[:, :3]
+        num_vali_points = len(test_ground_truth)
         
-        print("10 repeat average using {} neighbors: ".format(num_neighbors))
-        print("random guessing acc is %.4f" % (np.mean(random_acc)))
-        print("weighted neighbor is %.4f" %(np.mean(weighted_acc)))
-        print("average_neighbor is %.4f" % (np.mean(avg_acc)))
-        print("random neighbor acc is %.4f" % (np.mean(random_neighbor_acc)))
-        print()
+        prediction = som.transform(test_data[:, :num_spectra_columns])
+        u_matrix = som.get_u_matrix()
+        shortest_distance = shortest_path_matrix(prediction, u_matrix, n_rows, n_columns)        
+        num_properties = len(test_ground_truth[0])
 
-        
+        for fenmu in [0.1]:
+            for i in range(10):
+                test_data_all, shortest_distance = shuffle_matrix(test_data_all, shortest_distance)
+                test_ground_truth = test_data_all[:, :3]
+
+                weighted_neighbor_pred, average_neighbor_pred, random_neighbor_pred = estimate_value(shortest_distance, num_neighbors, num_vali_points, num_properties, fenmu)
+                weighted_som_acc = mean_squared_error(weighted_neighbor_pred, test_ground_truth[:num_vali_points])
+                average_som_acc = mean_squared_error(average_neighbor_pred, test_ground_truth[:num_vali_points])
+                random_som_acc = mean_squared_error(random_neighbor_pred, test_ground_truth[:num_vali_points])
+
+                random_guess_array = get_random_array(num_vali_points, num_properties)
+                random_guess_acc = mean_squared_error(random_guess_array, test_ground_truth[:num_vali_points])
+                
+                weighted_acc.append(weighted_som_acc)
+                avg_acc.append(average_som_acc)
+                random_neighbor_acc.append(random_som_acc)
+                random_acc.append(random_guess_acc)
+    print()
+    # print("10 repeat average using {} neighbors: ".format(num_neighbors))
+    # print("random guessing acc is %.4f" % (np.mean(random_acc)))
+    # print("weighted neighbor is %.4f" %(np.mean(weighted_acc)))
+    # print("average_neighbor is %.4f" % (np.mean(avg_acc)))
+    # print("random neighbor acc is %.4f" % (np.mean(random_neighbor_acc)))
+    print("10 repeat average using {} neighbors: ".format(num_neighbors))
+    print("%.4f" % (np.mean(random_acc)))
+    print("%.4f" % (np.mean(weighted_acc)))
+    print("%.4f" % (np.mean(avg_acc)))
+    print("%.4f" % (np.mean(random_neighbor_acc)))
+
+    print()
+    print()
+    
